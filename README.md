@@ -1,5 +1,5 @@
 ![Project banner](docs/static/mjlab-banner.jpg)
-
+[mjlab改版：中文说明](https://www.jianshu.com/p/58ff1978a6a0)
 # mjlab
 
 <p align="left">
