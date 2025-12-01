@@ -36,6 +36,6 @@ class UnitreeG1PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     )
   )
   experiment_name: str = "g1_velocity"
-  save_interval: int = 50
+  save_interval: int = 2000
   num_steps_per_env: int = 24
   max_iterations: int = 30_000

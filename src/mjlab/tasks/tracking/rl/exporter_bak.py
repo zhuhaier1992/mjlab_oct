@@ -18,7 +18,7 @@ def export_motion_policy_as_onnx(
   normalizer: object | None = None,
   filename="policy.onnx",
   verbose=False,
-  motion = True
+  motion: bool = True
 ):
   if not os.path.exists(path):
     os.makedirs(path, exist_ok=True)
@@ -57,33 +57,7 @@ class _OnnxMotionPolicyExporter(_OnnxPolicyExporter):
       self.body_lin_vel_w[time_step_clamped],
       self.body_ang_vel_w[time_step_clamped],
     )
-
-  # def export(self, path, filename):
-  #   self.to("cpu")
-  #   obs = torch.zeros(1, self.actor[0].in_features)
-  #   time_step = torch.zeros(1, 1)
-  #   try:
-  #       torch.onnx.export(
-  #       self,
-  #       (obs, time_step),
-  #       os.path.join(path, filename),
-  #       export_params=True,
-  #       opset_version=13,
-  #       verbose=self.verbose,
-  #       input_names=["obs", "time_step"],
-  #       output_names=[
-  #         "actions",
-  #         "joint_pos",
-  #         "joint_vel",
-  #         "body_pos_w",
-  #         "body_quat_w",
-  #         "body_lin_vel_w",
-  #         "body_ang_vel_w",
-  #       ],
-  #       dynamic_axes={},)
-  #   except Exception as e:
-  #       print(f"导出ONNX模型时出错: {e}")
-        
+ 
   def export(self, path, filename):
       self.to("cpu")
       obs = torch.zeros(1, self.actor[0].in_features)
@@ -126,7 +100,6 @@ class _OnnxMotionPolicyExporter(_OnnxPolicyExporter):
             "body_ang_vel_w",
           ],
           dynamic_axes={},)
-
 
 
 class _OnnxVelocityPolicyExporter(_OnnxPolicyExporter):
@@ -175,6 +148,7 @@ class _OnnxVelocityPolicyExporter(_OnnxPolicyExporter):
           ],
           dynamic_axes={},)
       
+
 def list_to_csv_str(arr, *, decimals: int = 3, delimiter: str = ",") -> str:
   fmt = f"{{:.{decimals}f}}"
   return delimiter.join(
@@ -186,7 +160,8 @@ def list_to_csv_str(arr, *, decimals: int = 3, delimiter: str = ",") -> str:
 
 
 def attach_onnx_metadata(
-  env: ManagerBasedRlEnv, run_path: str, path: str, filename="policy.onnx") -> None:
+  env: ManagerBasedRlEnv, run_path: str, path: str, filename="policy.onnx"
+) -> None:
   robot: Entity = env.scene["robot"]
   onnx_path = os.path.join(path, filename)
   joint_action = env.action_manager.get_term("joint_pos")
@@ -194,11 +169,9 @@ def attach_onnx_metadata(
   ctrl_ids = robot.indexing.ctrl_ids.cpu().numpy()
   joint_stiffness = env.sim.mj_model.actuator_gainprm[ctrl_ids, 0]
   joint_damping = -env.sim.mj_model.actuator_biasprm[ctrl_ids, 2]
-
   motion_term = env.command_manager.get_term("motion")
   assert isinstance(motion_term, MotionCommand)
   motion_term_cfg = motion_term.cfg
-  
   metadata = {
     "run_path": run_path,
     "joint_names": robot.joint_names,
@@ -212,40 +185,6 @@ def attach_onnx_metadata(
     else joint_action._scale,
     "anchor_body_name": motion_term_cfg.anchor_body_name,
     "body_names": motion_term_cfg.body_names,
-  }
-
-  model = onnx.load(onnx_path)
-
-  for k, v in metadata.items():
-    entry = onnx.StringStringEntryProto()
-    entry.key = k
-    entry.value = list_to_csv_str(v) if isinstance(v, list) else str(v)
-    model.metadata_props.append(entry)
-
-  onnx.save(model, onnx_path)
-  
-
-def attach_onnx_metadata_2(
-  env: ManagerBasedRlEnv, run_path: str, path: str, filename="policy.onnx") -> None:
-  robot: Entity = env.scene["robot"]
-  onnx_path = os.path.join(path, filename)
-  joint_action = env.action_manager.get_term("joint_pos")
-  assert isinstance(joint_action, JointAction)
-  ctrl_ids = robot.indexing.ctrl_ids.cpu().numpy()
-  joint_stiffness = env.sim.mj_model.actuator_gainprm[ctrl_ids, 0]
-  joint_damping = -env.sim.mj_model.actuator_biasprm[ctrl_ids, 2]
-
-  metadata = {
-    "run_path": run_path,
-    "joint_names": robot.joint_names,
-    "joint_stiffness": joint_stiffness.tolist(),
-    "joint_damping": joint_damping.tolist(),
-    "default_joint_pos": robot.data.default_joint_pos[0].cpu().tolist(),
-    "command_names": env.command_manager.active_terms,
-    "observation_names": env.observation_manager.active_terms["policy"],
-    "action_scale": joint_action._scale[0].cpu().tolist()
-    if isinstance(joint_action._scale, torch.Tensor)
-    else joint_action._scale
   }
 
   model = onnx.load(onnx_path)

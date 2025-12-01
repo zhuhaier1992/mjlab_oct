@@ -2,7 +2,6 @@ from typing import Any
 
 import numpy as np
 import torch
-import tyro
 from tqdm import tqdm
 
 from mjlab.entity import Entity
@@ -309,40 +308,40 @@ def run_sim(
         np.savez(output_name, **log)
 
         print("Uploading to Weights & Biases...")
-        # import wandb
+        import wandb
 
-        # COLLECTION = output_name
-        # run = wandb.init(
-        #   project="csv_to_npz", name=COLLECTION, entity="tjf-oct-vision"
-        # )
-        # print(f"[INFO]: Logging motion to wandb: {COLLECTION}")
-        # REGISTRY = "motions"
-        # logged_artifact = run.log_artifact(
-        #   artifact_or_path="/tmp/motion.npz", name=COLLECTION, type=REGISTRY
-        # )
-        # run.link_artifact(
-        #   artifact=logged_artifact,
-        #   target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}",
-        # )
-        # print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
+        COLLECTION = output_name
+        run = wandb.init(
+          project="csv_to_npz", name=COLLECTION, entity="zhe92"
+        )
+        print(f"[INFO]: Logging motion to wandb: {COLLECTION}")
+        REGISTRY = "motions"
+        logged_artifact = run.log_artifact(
+          artifact_or_path="/tmp/motion.npz", name=COLLECTION, type=REGISTRY
+        )
+        run.link_artifact(
+          artifact=logged_artifact,
+          target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}",
+        )
+        print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
 
-        # if render:
-        #   from moviepy import ImageSequenceClip
+        if render:
+          from moviepy import ImageSequenceClip
 
-        #   print("Creating video...")
-        #   clip = ImageSequenceClip(frames, fps=output_fps)
-        #   clip.write_videofile("./motion.mp4")
+          print("Creating video...")
+          clip = ImageSequenceClip(frames, fps=output_fps)
+          clip.write_videofile("./motion.mp4")
 
-        #   print("Logging video to wandb...")
-        #   wandb.log({"motion_video": wandb.Video("./motion.mp4", format="mp4")})
+          print("Logging video to wandb...")
+          wandb.log({"motion_video": wandb.Video("./motion.mp4", format="mp4")})
 
-        # wandb.finish()
+        wandb.finish()
 
 
 def main(
-  input_file: str,
-  output_name: str,
-  input_fps: float = 30.0,
+  input_file: str = "/home/robot/projects/motion_data/G1_gangnam_style_V01.bvh_60hz.csv",
+  output_name: str = "/home/robot/projects/motion_data/G1_gangnam_style_test.npz",
+  input_fps: float = 60.0,
   output_fps: float = 50.0,
   device: str = "cuda:0",
   render: bool = False,
@@ -431,4 +430,5 @@ def main(
 
 
 if __name__ == "__main__":
-  tyro.cli(main)
+    motion = np.load("/home/robot/projects/motion_data/G1_gangnam_style_test.npz")
+    main()

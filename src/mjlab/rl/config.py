@@ -71,7 +71,7 @@ class RslRlBaseRunnerCfg:
   """The seed for the experiment. Default is 42."""
   num_steps_per_env: int = 24
   """The number of steps per environment update."""
-  max_iterations: int = 300
+  max_iterations: int = 150
   """The maximum number of iterations."""
   obs_groups: dict[str, list[str]] = field(
     default_factory=lambda: {"policy": ["policy"], "critic": ["policy", "critic"]},
@@ -82,7 +82,7 @@ class RslRlBaseRunnerCfg:
   """The experiment name."""
   run_name: str = ""
   """The run name. Default is empty string."""
-  logger: Literal["wandb", "tensorboard"] = "wandb"
+  logger: Literal["wandb", "tensorboard"] = "tensorboard"
   """The logger to use. Default is wandb."""
   wandb_project: str = "mjlab"
   """The wandb project name."""

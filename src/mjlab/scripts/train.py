@@ -25,7 +25,8 @@ from mjlab.utils.torch import configure_torch_backends
 class TrainConfig:
   env: Any
   agent: RslRlOnPolicyRunnerCfg
-  registry_name: str | None = None
+  # registry_name: str | None = None
+  motion_file: str | None = None
   device: str = "cuda:0"
   video: bool = False
   video_length: int = 200
@@ -39,18 +40,20 @@ def run_train(task: str, cfg: TrainConfig) -> None:
   registry_name: str | None = None
 
   if isinstance(cfg.env, TrackingEnvCfg):
-    if not cfg.registry_name:
-      raise ValueError("Must provide --registry-name for tracking tasks.")
+    # if not cfg.registry_name:
+    #   raise ValueError("Must provide --registry-name for tracking tasks.")
 
-    # Check if the registry name includes alias, if not, append ":latest".
-    registry_name = cast(str, cfg.registry_name)
-    if ":" not in registry_name:
-      registry_name = registry_name + ":latest"
-    import wandb
+    # # Check if the registry name includes alias, if not, append ":latest".
+    # registry_name = cast(str, cfg.registry_name)
+    # if ":" not in registry_name:
+    #   registry_name = registry_name + ":latest"
+    # import wandb
 
-    api = wandb.Api()
-    artifact = api.artifact(registry_name)
-    cfg.env.commands.motion.motion_file = str(Path(artifact.download()) / "motion.npz")
+    # api = wandb.Api()
+    # artifact = api.artifact(registry_name)
+    # cfg.env.commands.motion.motion_file = str(Path(artifact.download()) / "motion.npz")
+    
+    cfg.env.commands.motion.motion_file = registry_name = cast(str, cfg.motion_file)
 
   # Enable NaN guard if requested
   if cfg.enable_nan_guard:
@@ -123,6 +126,16 @@ def main():
     add_help=False,
     return_unknown_args=True,
   )
+  # task = []
+  # for k in gym.registry.keys():
+  #   if k.startswith(task_prefix):
+  #     task.append(k)
+      
+  # chosen_task, remaining_args = tyro.cli(
+  #   tyro.extras.literal_type_from_choices(task),
+  #   add_help=False,
+  #   return_unknown_args=True,
+  # )
   del task_prefix
 
   # Parse the rest of the arguments + allow overriding env_cfg and agent_cfg.

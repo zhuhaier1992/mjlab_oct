@@ -75,8 +75,8 @@ class CommandsCfg:
     heading_control_stiffness=0.5,
     debug_vis=True,
     ranges=mdp.UniformVelocityCommandCfg.Ranges(
-      lin_vel_x=(-1.0, 1.0),
-      lin_vel_y=(-0.5, 0.5),
+      lin_vel_x=(-1.2, 1.2),
+      lin_vel_y=(-0.6, 0.6),
       ang_vel_z=(-1.0, 1.0),
       heading=(-math.pi, math.pi),
     ),
@@ -157,7 +157,7 @@ class EventCfg:
     func=mdp.push_by_setting_velocity,
     mode="interval",
     interval_range_s=(1.0, 3.0),
-    params={"velocity_range": {"x": (-1.0, 1.0), "y": (-1.0, 1.0)}},
+    params={"velocity_range": {"x": (-1.2, 1.2), "y": (-1.2, 1.2)}},
   )
   foot_friction: EventTerm = term(
     EventTerm,
