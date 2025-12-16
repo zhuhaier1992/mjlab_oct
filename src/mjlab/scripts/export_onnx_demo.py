@@ -77,8 +77,8 @@ if __name__ == "__main__":
     export_from_checkpoint(
         task_name="Mjlab-Tracking-Flat-Unitree-G1-No-State-Estimation",  
         # task_name="Mjlab-Velocity-Rough-Unitree-G1",
-        checkpoint_path="/home/robot/projects/mjlab/logs/rsl_rl/g1_tracking/2025-11-28_16-09-06/model_29999.pt",  # 检查点路径
+        checkpoint_path="/home/robot/projects/mjlab/logs/rsl_rl/g1_tracking/2025-12-12_17-48-20/model_89999.pt",  # 检查点路径
         output_dir="/home/robot/projects/motion_data/onnx/",
-        file_name="conduct1min.onnx",
-        motion_file_path="/home/robot/projects/mjlab/artifacts/local/conduct1min.npz"
+        file_name="broadcast_1min.onnx",
+        motion_file_path="/home/robot/projects/mjlab/artifacts/local/tu3_2.npz"
     )

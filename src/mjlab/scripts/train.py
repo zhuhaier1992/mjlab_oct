@@ -64,19 +64,27 @@ def run_train(task: str, cfg: TrainConfig) -> None:
   log_root_path = Path("logs") / "rsl_rl" / cfg.agent.experiment_name
   log_root_path.resolve()
   print(f"[INFO] Logging experiment in directory: {log_root_path}")
-  log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-  if cfg.agent.run_name:
-    log_dir += f"_{cfg.agent.run_name}"
-  log_dir = log_root_path / log_dir
-
-  env = gym.make(
-    task, cfg=cfg.env, device=cfg.device, render_mode="rgb_array" if cfg.video else None
-  )
-
+  
+  # Get checkpoint path if resuming
   resume_path = (
     get_checkpoint_path(log_root_path, cfg.agent.load_run, cfg.agent.load_checkpoint)
     if cfg.agent.resume
     else None
+  )
+  
+  # Use existing log directory when resuming, otherwise create a new one
+  if resume_path is not None:
+    log_dir = resume_path.parent
+    print(f"[INFO] Resuming training from existing log directory: {log_dir}")
+  else:
+    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if cfg.agent.run_name:
+      log_dir += f"_{cfg.agent.run_name}"
+    log_dir = log_root_path / log_dir
+    print(f"[INFO] Starting new training run in directory: {log_dir}")
+
+  env = gym.make(
+    task, cfg=cfg.env, device=cfg.device, render_mode="rgb_array" if cfg.video else None
   )
 
   if cfg.video:
