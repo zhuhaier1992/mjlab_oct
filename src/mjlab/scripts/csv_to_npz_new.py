@@ -1,17 +1,32 @@
+"""Convert CSV motion data to NPZ format with optional video rendering.
+
+This script must set MUJOCO_GL before importing mujoco-related modules.
+"""
 from typing import Any
+import os
+import sys
+
+# Set MUJOCO_GL before any mujoco imports for headless rendering
+# This is parsed from command line arguments early
+if "--render" in sys.argv:
+  # Try EGL first (GPU-accelerated), fall back to OSMesa if needed
+  # User can override with MUJOCO_GL environment variable
+  if "MUJOCO_GL" not in os.environ:
+    os.environ["MUJOCO_GL"] = "egl"
+  print(f"[INFO] MUJOCO_GL set to: {os.environ['MUJOCO_GL']}")
 
 import numpy as np
 import torch
 import tyro
+from pathlib import Path
 from tqdm import tqdm
 
 from mjlab.entity import Entity
 from mjlab.scene import Scene
 from mjlab.sim.sim import Simulation, SimulationCfg
-from mjlab.tasks.tracking.config.g1.flat_env_cfg import G1FlatEnvCfg
-from mjlab.third_party.isaaclab.isaaclab.utils.math import (
+from mjlab.tasks.tracking.config.g1.env_cfgs import unitree_g1_flat_tracking_env_cfg
+from mjlab.utils.lab_api.math import (
   axis_angle_from_quat,
-  quat_apply_inverse,
   quat_conjugate,
   quat_mul,
   quat_slerp,
@@ -28,11 +43,6 @@ class MotionLoader:
     output_fps: int,
     device: torch.device | str,
     line_range: tuple[int, int] | None = None,
-    add_start_transition: bool = False,
-    add_end_transition: bool = False,
-    transition_duration: float = 1.0,
-    pad_duration: float = 0.0,
-    safe_height: float = 0.76,
   ):
     self.motion_file = motion_file
     self.input_fps = input_fps
@@ -42,29 +52,7 @@ class MotionLoader:
     self.current_idx = 0
     self.device = device
     self.line_range = line_range
-    self.add_start_transition = add_start_transition
-    self.add_end_transition = add_end_transition
-    self.transition_duration = transition_duration
-    self.pad_duration = pad_duration
-    self.safe_height = safe_height
-
-    # Safe standing pose (matches robot DOF ordering).
-    # fmt: off
-    self.safe_pose_joints = torch.tensor(
-      [
-        -0.312, 0, 0, 0.669, -0.363, 0,  # left leg
-        -0.312, 0, 0, 0.669, -0.363, 0,  # right leg
-        0, 0, 0,  # waist
-        0.2, 0.2, 0, 0.6, 0, 0, 0,  # left arm
-        0.2, -0.2, 0, 0.6, 0, 0, 0,  # right arm
-      ],
-      dtype=torch.float32,
-      device=self.device,
-    )
-    # fmt: on
-
     self._load_motion()
-    self._add_transitions()
     self._interpolate_motion()
     self._compute_velocities()
 
@@ -91,128 +79,6 @@ class MotionLoader:
     self.motion_dof_poss_input = motion[:, 7:]
 
     self.input_frames = motion.shape[0]
-    self.duration = (self.input_frames - 1) * self.input_dt
-
-  def _add_transitions(self) -> None:
-    """Optionally add start/end transitions and padding to the input motion."""
-    dof_dim = self.motion_dof_poss_input.shape[1]
-    if self.safe_pose_joints.numel() != dof_dim:
-      raise ValueError(
-        "Safe pose DOF dimension does not match motion DOF dimension: "
-        f"{self.safe_pose_joints.numel()} vs {dof_dim}"
-      )
-
-    def _ease_in_cubic(t: torch.Tensor) -> torch.Tensor:
-      return t**3
-
-    def _ease_out_cubic(t: torch.Tensor) -> torch.Tensor:
-      return 1 - (1 - t) ** 3
-
-    def _create_transition(
-      start_pos: torch.Tensor,
-      start_rot: torch.Tensor,
-      start_joints: torch.Tensor,
-      target_pos: torch.Tensor,
-      target_rot: torch.Tensor,
-      target_joints: torch.Tensor,
-      num_frames: int,
-      ease_fn,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-      # Ensure tensors are correct shape (1, n)
-      start_pos = start_pos.unsqueeze(0)
-      start_rot = start_rot.unsqueeze(0)
-      start_joints = start_joints.unsqueeze(0)
-      target_pos = target_pos.unsqueeze(0)
-      target_rot = target_rot.unsqueeze(0)
-      target_joints = target_joints.unsqueeze(0)
-
-      t = torch.linspace(0, 1, steps=num_frames, device=self.device)
-      t_eased = ease_fn(t)
-      t_eased = t_eased.unsqueeze(1)  # (B, 1)
-
-      pos = self._lerp(start_pos.expand_as(target_pos), target_pos, t_eased)
-      joints = self._lerp(start_joints.expand_as(target_joints), target_joints, t_eased)
-
-      # For rotations, perform slerp per frame.
-      start_rot_expand = start_rot.expand(num_frames, -1)
-      target_rot_expand = target_rot.expand(num_frames, -1)
-      rot = self._slerp(start_rot_expand, target_rot_expand, t_eased.squeeze(1))
-
-      return pos, rot, joints
-
-    transition_frames = max(1, int(self.transition_duration * self.input_fps))
-
-    # Start transition: safe pose -> first frame.
-    if self.add_start_transition and transition_frames > 1:
-      target_pos = self.motion_base_poss_input[0].clone()
-      target_rot = self.motion_base_rots_input[0].clone()
-      target_joints = self.motion_dof_poss_input[0].clone()
-
-      start_pos = target_pos.clone()
-      start_pos[2] = self.safe_height  # set to safe height
-      start_rot = target_rot.clone()  # keep same heading
-      start_joints = self.safe_pose_joints.clone()
-
-      pos, rot, joints = _create_transition(
-        start_pos,
-        start_rot,
-        start_joints,
-        target_pos,
-        target_rot,
-        target_joints,
-        transition_frames,
-        _ease_in_cubic,
-      )
-
-      self.motion_base_poss_input = torch.cat([pos, self.motion_base_poss_input], dim=0)
-      self.motion_base_rots_input = torch.cat([rot, self.motion_base_rots_input], dim=0)
-      self.motion_dof_poss_input = torch.cat([joints, self.motion_dof_poss_input], dim=0)
-
-    # End transition: last frame -> safe pose.
-    if self.add_end_transition and transition_frames > 1:
-      start_pos = self.motion_base_poss_input[-1].clone()
-      start_rot = self.motion_base_rots_input[-1].clone()
-      start_joints = self.motion_dof_poss_input[-1].clone()
-
-      target_pos = start_pos.clone()
-      target_pos[2] = self.safe_height  # move to safe height
-      target_rot = start_rot.clone()  # keep heading
-      target_joints = self.safe_pose_joints.clone()
-
-      pos, rot, joints = _create_transition(
-        start_pos,
-        start_rot,
-        start_joints,
-        target_pos,
-        target_rot,
-        target_joints,
-        transition_frames,
-        _ease_out_cubic,
-      )
-
-      self.motion_base_poss_input = torch.cat([self.motion_base_poss_input, pos], dim=0)
-      self.motion_base_rots_input = torch.cat([self.motion_base_rots_input, rot], dim=0)
-      self.motion_dof_poss_input = torch.cat([self.motion_dof_poss_input, joints], dim=0)
-
-    # Optional padding: hold final pose.
-    if self.pad_duration > 0:
-      pad_frames = int(self.pad_duration * self.input_fps)
-      if pad_frames > 0:
-        pad_pos = self.motion_base_poss_input[-1:].expand(pad_frames, -1)
-        pad_rot = self.motion_base_rots_input[-1:].expand(pad_frames, -1)
-        pad_joints = self.motion_dof_poss_input[-1:].expand(pad_frames, -1)
-
-        self.motion_base_poss_input = torch.cat(
-          [self.motion_base_poss_input, pad_pos], dim=0
-        )
-        self.motion_base_rots_input = torch.cat(
-          [self.motion_base_rots_input, pad_rot], dim=0
-        )
-        self.motion_dof_poss_input = torch.cat(
-          [self.motion_dof_poss_input, pad_joints], dim=0
-        )
-
-    self.input_frames = self.motion_base_poss_input.shape[0]
     self.duration = (self.input_frames - 1) * self.input_dt
 
   def _interpolate_motion(self):
@@ -340,11 +206,6 @@ def run_sim(
   render,
   line_range,
   renderer: OffscreenRenderer | None = None,
-  add_start_transition: bool = False,
-  add_end_transition: bool = False,
-  transition_duration: float = 1.0,
-  pad_duration: float = 0.0,
-  safe_height: float = 0.76,
 ):
   motion = MotionLoader(
     motion_file=input_file,
@@ -352,11 +213,6 @@ def run_sim(
     output_fps=output_fps,
     device=sim.device,
     line_range=line_range,
-    add_start_transition=add_start_transition,
-    add_end_transition=add_end_transition,
-    transition_duration=transition_duration,
-    pad_duration=pad_duration,
-    safe_height=safe_height,
   )
 
   robot: Entity = scene["robot"]
@@ -408,7 +264,7 @@ def run_sim(
     root_states[:, :2] += scene.env_origins[:, :2]
     root_states[:, 3:7] = motion_base_rot
     root_states[:, 7:10] = motion_base_lin_vel
-    root_states[:, 10:] = quat_apply_inverse(motion_base_rot, motion_base_ang_vel)
+    root_states[:, 10:] = motion_base_ang_vel
     robot.write_root_state_to_sim(root_states)
 
     joint_pos = robot.data.default_joint_pos.clone()
@@ -464,38 +320,29 @@ def run_sim(
         ):
           log[k] = np.stack(log[k], axis=0)
 
-        print("Saving to /tmp/motion.npz...")
-        np.savez(output_name, **log)
+        # Save locally in the same directory as the input CSV file
+        input_path = Path(input_file)
+        output_dir = input_path.parent
+        output_filename = output_name if output_name else input_path.stem
+        output_path = output_dir / f"{output_filename}.npz"
+        
+        print(f"Saving to {output_path}...")
+        np.savez(output_path, **log)  # type: ignore[arg-type]
+        print(f"[INFO]: Motion saved locally to: {output_path}")
 
-        print("Uploading to Weights & Biases...")
-        # import wandb
-
-        # COLLECTION = output_name
-        # run = wandb.init(
-        #   project="csv_to_npz", name=COLLECTION, entity="tjf-oct-vision"
-        # )
-        # print(f"[INFO]: Logging motion to wandb: {COLLECTION}")
-        # REGISTRY = "motions"
-        # logged_artifact = run.log_artifact(
-        #   artifact_or_path="/tmp/motion.npz", name=COLLECTION, type=REGISTRY
-        # )
-        # run.link_artifact(
-        #   artifact=logged_artifact,
-        #   target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}",
-        # )
-        # print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
-
-        # if render:
-        #   from moviepy import ImageSequenceClip
-
-        #   print("Creating video...")
-        #   clip = ImageSequenceClip(frames, fps=output_fps)
-        #   clip.write_videofile("./motion.mp4")
-
-        #   print("Logging video to wandb...")
-        #   wandb.log({"motion_video": wandb.Video("./motion.mp4", format="mp4")})
-
-        # wandb.finish()
+        # Optionally save video locally in the same directory if rendering is enabled
+        if render and frames:
+          try:
+            from moviepy import ImageSequenceClip
+            print("Creating video...")
+            clip = ImageSequenceClip(frames, fps=output_fps)
+            video_path = output_dir / f"{output_filename}.mp4"
+            clip.write_videofile(str(video_path), logger=None)  # Suppress moviepy verbose output
+            print(f"[INFO]: Video saved locally to: {video_path}")
+          except ImportError:
+            print("[WARNING] MoviePy not available. Install with: pip install moviepy")
+          except Exception as e:
+            print(f"[ERROR] Failed to create video: {e}")
 
 
 def main(
@@ -506,32 +353,30 @@ def main(
   device: str = "cuda:0",
   render: bool = False,
   line_range: tuple[int, int] | None = None,
-  add_start_transition: bool = False,
-  add_end_transition: bool = False,
-  transition_duration: float = 1.0,
-  pad_duration: float = 0.0,
-  safe_height: float = 0.76,
 ):
   """Replay motion from CSV file and output to npz file.
 
   Args:
     input_file: Path to the input CSV file.
-    output_name: Path to the output npz file.
+    output_name: Name for the output files (without extension). If empty, uses input file stem.
     input_fps: Frame rate of the CSV file.
     output_fps: Desired output frame rate.
     device: Device to use.
     render: Whether to render the simulation and save a video.
     line_range: Range of lines to process from the CSV file.
-    add_start_transition: Add a transition from a safe pose to the first frame.
-    add_end_transition: Add a transition from the last frame to a safe pose.
-    transition_duration: Seconds for each transition segment.
-    pad_duration: Seconds to hold the final pose after transitions.
-    safe_height: Base height used for safe pose transitions.
   """
+  if render:
+    print("[INFO] Rendering enabled for video generation.")
+    print("[INFO] If rendering fails, try running with: MUJOCO_GL=osmesa python ...")
+  
+  # Use input file stem as output name if not provided
+  if not output_name:
+    output_name = Path(input_file).stem
+  
   sim_cfg = SimulationCfg()
   sim_cfg.mujoco.timestep = 1.0 / output_fps
 
-  scene = Scene(G1FlatEnvCfg().scene, device=device)
+  scene = Scene(unitree_g1_flat_tracking_env_cfg().scene, device=device)
   model = scene.compile()
 
   sim = Simulation(num_envs=1, cfg=sim_cfg, model=model, device=device)
@@ -540,20 +385,27 @@ def main(
 
   renderer = None
   if render:
-    viewer_cfg = ViewerConfig(
-      height=480,
-      width=640,
-      origin_type=ViewerConfig.OriginType.ASSET_ROOT,
-      distance=2.0,
-      elevation=-5.0,
-      azimuth=20,
-    )
-    renderer = OffscreenRenderer(
-      model=sim.mj_model,
-      cfg=viewer_cfg,
-      scene=scene,
-    )
-    renderer.initialize()
+    try:
+      viewer_cfg = ViewerConfig(
+        height=480,
+        width=640,
+        origin_type=ViewerConfig.OriginType.ASSET_ROOT,
+        distance=2.0,
+        elevation=-5.0,
+        azimuth=20,
+      )
+      renderer = OffscreenRenderer(
+        model=sim.mj_model,
+        cfg=viewer_cfg,
+        scene=scene,
+      )
+      renderer.initialize()
+      print("[INFO] Renderer initialized successfully.")
+    except Exception as e:
+      print(f"[ERROR] Failed to initialize renderer: {e}")
+      print("[INFO] Continuing without rendering. Try setting MUJOCO_GL=osmesa if EGL fails.")
+      render = False
+      renderer = None
 
   run_sim(
     sim=sim,
@@ -596,11 +448,6 @@ def main(
     render=render,
     line_range=line_range,
     renderer=renderer,
-    add_start_transition=add_start_transition,
-    add_end_transition=add_end_transition,
-    transition_duration=transition_duration,
-    pad_duration=pad_duration,
-    safe_height=safe_height,
   )
 
 
